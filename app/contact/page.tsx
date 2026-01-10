@@ -4,15 +4,14 @@ import { PublicShell } from "@/components/PublicShell";
 import { SectionReveal } from "@/components/SectionReveal";
 import { Skeleton } from "@/components/Skeleton";
 import { useSiteSettings } from "@/lib/useSiteSettings";
-import { ExternalLink, Mail, MapPin, Phone } from "lucide-react";
-import { useMemo } from "react";
+import { ExternalLink, Mail, MapPin, Phone, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 function cx(...cls: Array<string | false | null | undefined>) {
   return cls.filter(Boolean).join(" ");
 }
 
 function mapsEmbedSrc(address?: string | null) {
-  // Embed without API key (simple). Uses "q" query.
   const q = (address || "").replace(/\n/g, " ").trim();
   const query = q ? encodeURIComponent(q) : encodeURIComponent("Indonesia");
   return `https://www.google.com/maps?q=${query}&output=embed`;
@@ -24,8 +23,11 @@ function mapsLink(address?: string | null) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
 }
 
+type ModalState =
+  | { open: false }
+  | { open: true; kind: "success" | "error"; title: string; desc?: string };
+
 export default function ContactPage() {
-  // Settings dibaca dari cache hook (1x fetch untuk seluruh app)
   const { settings } = useSiteSettings();
 
   const email = settings?.email ? String(settings.email).trim() : null;
@@ -34,6 +36,68 @@ export default function ContactPage() {
 
   const embedSrc = useMemo(() => mapsEmbedSrc(address), [address]);
   const mapsHref = useMemo(() => mapsLink(address), [address]);
+
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [modal, setModal] = useState<ModalState>({ open: false });
+
+  function closeModal() {
+    setModal({ open: false });
+  }
+
+  useEffect(() => {
+    if (!modal.open) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeModal();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modal.open]);
+
+ async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  e.preventDefault();
+
+  const form = e.currentTarget; // <-- simpan dulu
+  setStatus("sending");
+
+  const fd = new FormData(form);
+  const payload = {
+    name: String(fd.get("name") || ""),
+    email: String(fd.get("email") || ""),
+    message: String(fd.get("message") || ""),
+    website: String(fd.get("website") || ""),
+  };
+
+  try {
+    const res = await fetch("/api/contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || "Gagal mengirim pesan.");
+
+    setStatus("sent");
+    form.reset(); // <-- pakai ini, bukan e.currentTarget.reset()
+
+    setModal({
+      open: true,
+      kind: "success",
+      title: "Pesan terkirim",
+      desc: "Terima kasih! Tim kami akan menindaklanjuti secepatnya.",
+    });
+  } catch (err: any) {
+    setStatus("error");
+    setModal({
+      open: true,
+      kind: "error",
+      title: "Gagal mengirim",
+      desc: err?.message || "Coba lagi beberapa saat ya.",
+    });
+  }
+}
+
 
   return (
     <PublicShell>
@@ -52,7 +116,6 @@ export default function ContactPage() {
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">Contact info</h2>
 
-              {/* Open in Google Maps */}
               <a
                 href={mapsHref}
                 target="_blank"
@@ -97,7 +160,10 @@ export default function ContactPage() {
                       Email
                     </div>
                     {email ? (
-                      <a className="mt-1 inline-block font-semibold text-brand-700 hover:underline" href={`mailto:${email}`}>
+                      <a
+                        className="mt-1 inline-block font-semibold text-brand-700 hover:underline"
+                        href={`mailto:${email}`}
+                      >
                         {email}
                       </a>
                     ) : (
@@ -115,12 +181,11 @@ export default function ContactPage() {
                     rel="noreferrer"
                     className={cx(
                       "group relative block overflow-hidden rounded-2xl border border-black/10",
-                      "bg-white"
+                        "bg-white/70 backdrop-blur-[2px]"
                     )}
                     aria-label="Open location in Google Maps"
                     title="Open location in Google Maps"
                   >
-                    {/* 16:10 ratio */}
                     <div className="aspect-[16/10] w-full">
                       <iframe
                         title="Google Maps"
@@ -131,11 +196,10 @@ export default function ContactPage() {
                       />
                     </div>
 
-                    {/* small overlay hint */}
                     <div
                       className={cx(
                         "pointer-events-none absolute left-3 top-3",
-                        "rounded-xl bg-white/90 px-3 py-1.5 text-xs font-semibold",
+                        "rounded-xl bg-white/80 backdrop-blur-[2px] px-3 py-1.5 text-xs font-semibold",
                         "border border-black/10 shadow-sm",
                         "opacity-0 transition group-hover:opacity-100"
                       )}
@@ -144,9 +208,7 @@ export default function ContactPage() {
                     </div>
                   </a>
 
-                  <div className="text-xs text-muted">
-                    *Peta di atas bisa di-klik untuk membuka Google Maps.
-                  </div>
+                  <div className="text-xs text-muted">*Peta di atas bisa di-klik untuk membuka Google Maps.</div>
                 </div>
               </div>
             ) : (
@@ -163,49 +225,108 @@ export default function ContactPage() {
           <SectionReveal className="card p-7">
             <h2 className="text-xl font-semibold">Message</h2>
             <p className="mt-2 text-sm text-muted">
-              Gunakan form ini untuk menanyakan program yayasan, pengajuan bantuan, atau informasi kegiatan. Tim kami akan menindaklanjuti secepatnya.
+              Gunakan form ini untuk menanyakan program yayasan, pengajuan bantuan, atau informasi kegiatan. Tim kami
+              akan menindaklanjuti secepatnya.
             </p>
 
-            <form
-              className="mt-4 grid gap-3"
-              action={`mailto:${email || ""}`}
-              method="post"
-              encType="text/plain"
-            >
+            <form className="mt-4 grid gap-3" onSubmit={onSubmit}>
+              {/* honeypot anti-bot (hidden) */}
+              <input name="website" tabIndex={-1} autoComplete="off" className="hidden" />
+
               <input
                 className={cx(
-                  "rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm",
+                  "rounded-2xl border border-black/10 bg-white/75 backdrop-blur-[2px] px-4 py-3 text-sm",
                   "outline-none focus:border-brand-600/40 focus:ring-4 focus:ring-brand-600/10"
                 )}
                 placeholder="Your name"
                 name="name"
                 autoComplete="name"
+                required
               />
               <input
                 className={cx(
-                  "rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm",
+                  "rounded-2xl border border-black/10 bg-white/75 backdrop-blur-[2px] px-4 py-3 text-sm",
                   "outline-none focus:border-brand-600/40 focus:ring-4 focus:ring-brand-600/10"
                 )}
                 placeholder="Email"
                 name="email"
                 type="email"
                 autoComplete="email"
+                required
               />
               <textarea
                 className={cx(
-                  "rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm min-h-[120px]",
+                  "rounded-2xl border border-black/10 bg-white/75 backdrop-blur-[2px] px-4 py-3 text-sm min-h-[120px]",
                   "outline-none focus:border-brand-600/40 focus:ring-4 focus:ring-brand-600/10"
                 )}
                 placeholder="Message"
                 name="message"
+                required
               />
-              <button className="btn btn-primary" type="submit">
-                Send
+
+              <button className="btn btn-primary" type="submit" disabled={status === "sending"}>
+                {status === "sending" ? "Sending..." : "Send"}
               </button>
             </form>
           </SectionReveal>
         </div>
       </section>
+
+      {/* MODAL NOTIF */}
+      {modal.open && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <button
+            type="button"
+            onClick={closeModal}
+            className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+            aria-label="Close modal"
+          />
+
+          {/* Panel */}
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative w-full max-w-md rounded-3xl border border-black/10 bg-white/80 backdrop-blur-[2px] p-6 shadow-2xl"
+          >
+            <button
+              type="button"
+              onClick={closeModal}
+              className="absolute right-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-black/10 transition-colors hover:bg-brand-100/70"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div
+              className={cx(
+                "inline-flex items-center rounded-2xl border px-3 py-1 text-xs font-semibold",
+                modal.kind === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-red-200 bg-red-50 text-red-800"
+              )}
+            >
+              {modal.kind === "success" ? "Success" : "Error"}
+            </div>
+
+            <div className="mt-3 text-lg font-semibold">{modal.title}</div>
+            {modal.desc ? <div className="mt-2 text-sm text-muted">{modal.desc}</div> : null}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeModal}
+                className={cx(
+                  "rounded-2xl px-4 py-2 text-sm font-semibold",
+                  "border border-black/10 transition-colors hover:bg-brand-100/70"
+                )}
+              >
+                Oke
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PublicShell>
   );
 }

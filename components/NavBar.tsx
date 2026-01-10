@@ -71,7 +71,7 @@ export function NavBar({
 
         <div className="hidden items-center gap-2 md:flex">
           <Link href={donateHref} className="btn btn-primary">
-            {donateLabel}
+            Donasi
           </Link>
           {/* <Link href="/admin/" className="btn btn-ghost">
             Admin
